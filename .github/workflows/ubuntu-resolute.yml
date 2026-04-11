@@ -1,0 +1,160 @@
+name: Ubuntu Resolute Auto-Build
+
+on:
+  push:
+    branches: [ main, master ]
+    paths-ignore:
+      - '.github/workflows/**'
+  schedule:
+    - cron: '5 0 * * *' # Checks Ubuntu mirrors every day
+  workflow_dispatch:
+
+env:
+  FORCE_BUILD: "false"
+
+jobs:
+  check-triggers:
+    runs-on: ubuntu-latest
+    outputs:
+      needs_build: ${{ steps.decision.outputs.needs_build }}
+      latest_tag: ${{ steps.check.outputs.tag }}
+    steps:
+      - name: Fetch Upstream Tag and Dependencies
+        id: check
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # 1. Fetch Latest Upstream Tag
+          LATEST_TAG=$(gh api repos/tjjh89017/ezio/tags --jq '.[0].name')
+          echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+          
+          # 2. Fetch Latest Resolute Versions
+          BASE_URL="https://people.canonical.com/~ubuntu-archive/madison.cgi"
+          PY3_VER=$(curl -s "${BASE_URL}?package=python3&s=resolute&text=on" | awk '{print $3}' | head -n 1)
+          GRPCIO_VER=$(curl -s "${BASE_URL}?package=python3-grpcio&s=resolute&text=on" | awk '{print $3}' | head -n 1)
+          GRPC_TOOLS_VER=$(curl -s "${BASE_URL}?package=python3-grpc-tools&s=resolute&text=on" | awk '{print $3}' | head -n 1)
+          URWID_VER=$(curl -s "${BASE_URL}?package=python3-urwid&s=resolute&text=on" | awk '{print $3}' | head -n 1)
+          LIBTORRENT_VER=$(curl -s "${BASE_URL}?package=libtorrent-rasterbar-dev&s=resolute&text=on" | awk '{print $3}' | head -n 1)
+          GRPC_CPP_VER=$(curl -s "${BASE_URL}?package=libgrpc++-dev&s=resolute&text=on" | awk '{print $3}' | head -n 1)
+          
+          # 3. Create Combined Fingerprint
+          FINGERPRINT="resolute-tag${LATEST_TAG}-py${PY3_VER}-grio${GRPCIO_VER}-gtl${GRPC_TOOLS_VER}-urw${URWID_VER}-lt${LIBTORRENT_VER}-gcp${GRPC_CPP_VER}"
+          echo "Combined Fingerprint: $FINGERPRINT"
+          echo "fingerprint=$FINGERPRINT" >> $GITHUB_OUTPUT
+
+      - name: Check Build Cache
+        id: cache-check
+        uses: actions/cache@v4
+        with:
+          path: last-build-fingerprint.txt
+          key: build-cache-resolute-${{ steps.check.outputs.fingerprint }}
+
+      - name: Decide to Build
+        id: decision
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]] || [[ "${{ steps.cache-check.outputs.cache-hit }}" != "true" ]] || [[ "${{ env.FORCE_BUILD }}" == "true" ]]; then
+            echo "needs_build=true" >> $GITHUB_OUTPUT
+            echo "${{ steps.check.outputs.fingerprint }}" > last-build-fingerprint.txt
+          else
+            echo "needs_build=false" >> $GITHUB_OUTPUT
+            echo "This exact combination of upstream tag and dependencies has already been built."
+          fi
+
+  build:
+    needs: check-triggers
+    if: needs.check-triggers.outputs.needs_build == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Upstream Code
+        uses: actions/checkout@v4
+        with:
+          repository: 'tjjh89017/ezio'
+          ref: ${{ needs.check-triggers.outputs.latest_tag }}
+          path: 'ezio-src'
+          fetch-depth: 0 
+
+      - name: Checkout Packaging Files
+        uses: actions/checkout@v4
+        with:
+          path: 'ezio-build'
+
+      - name: Merge Packaging with Source
+        run: |
+          cp -a ezio-build/debian/ ezio-src/debian/
+
+      - name: Build Debian Package
+        run: |
+          docker run --rm \
+            -v ${{ github.workspace }}/ezio-src:/src \
+            -e DEBFULLNAME="GitHub Actions CI" \
+            -e DEBEMAIL="actions@github.com" \
+            -e DEB_BUILD_OPTIONS="noautodbgsym" \
+            ubuntu:resolute /bin/bash -c "
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
+              
+              apt-get update
+              apt-get install -y devscripts equivs build-essential dh-python git-buildpackage git tar
+              
+              mkdir -p /build
+              cp -a /src/. /build/
+              cd /build
+              
+              git config --global --add safe.directory /build
+              git config --global user.name \"\$DEBFULLNAME\"
+              git config --global user.email \"\$DEBEMAIL\"
+              
+              # Resolve build-dependencies for Resolute
+              mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
+              
+              echo '=== Auto-Versioning ==='
+              # 1. Generate the snapshot FIRST (It will generate something like '-drbl4ubuntu1~1.gbp88c1fb')
+              gbp dch --ignore-branch --snapshot --auto
+              
+              # 2. OVERWRITE IT. This strips everything between '-drbl' and the '~' and forces it to be '-drblresolute'
+              sed -i -E '1s/-drbl[^~]+~/-drblresolute~/' debian/changelog
+              
+              UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')
+              
+              echo '=== Building SOURCE and Binary (amd64) ==='
+              tar --exclude=debian -czf ../ezio_\${UPSTREAM_VER}.orig.tar.gz .
+              dpkg-buildpackage -us -uc
+              
+              mkdir -p /src/output-debs
+              cp ../*.deb /src/output-debs/
+              cp ../*.orig.tar.gz /src/output-debs/ || true
+              cp ../*.dsc /src/output-debs/ || true
+              cp ../*.debian.tar.xz /src/output-debs/ || true
+              cp ../*.changes /src/output-debs/ || true
+
+              # Grant full read permissions so GitHub Actions can upload the files
+              chmod -R 777 /src/output-debs/
+            "
+
+      # Generate the timestamp
+      - name: Generate Timestamp
+        id: time
+        env:
+          TZ: Asia/Taipei
+        run: echo "timestamp=$(date +'%Y%m%d-%H%M%S')" >> $GITHUB_OUTPUT
+
+      # Append the timestamp to the artifact name
+      - name: Upload .deb to GitHub Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ezio-resolute-packages-amd64-${{ steps.time.outputs.timestamp }}
+          path: ezio-src/output-debs/
+
+      - name: Deploy to file Server
+        env:
+          SSH_KEY: ${{ secrets.REMOTE_SSH_KEY }}
+          HOST: ${{ secrets.REMOTE_HOST }}
+          USER: ${{ secrets.REMOTE_USER }}
+          DEST: ${{ secrets.REMOTE_PATH }}
+        if: env.SSH_KEY != ''
+        run: |
+          mkdir -p ~/.ssh
+          echo "$SSH_KEY" > ~/.ssh/id_rsa
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
+          rsync -avz -e "ssh -i ~/.ssh/id_rsa" ezio-src/output-debs/ $USER@$HOST:$DEST

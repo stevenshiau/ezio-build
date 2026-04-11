@@ -102,9 +102,13 @@ jobs:
             -e DEBFULLNAME="GitHub Actions CI" \
             -e DEBEMAIL="actions@github.com" \
             -e DEB_BUILD_OPTIONS="noautodbgsym" \
+            -e UPSTREAM_TAG="${{ needs.check-triggers.outputs.latest_tag }}" \
             debian:sid /bin/bash -c "
               set -e
               export DEBIAN_FRONTEND=noninteractive
+              
+              # Completely forbid APT from installing systemd v260+ to prevent QEMU crashes
+              printf \"Package: systemd systemd-sysv libsystemd0 udev libudev1\nPin: version 260*\nPin-Priority: -1\n\" > /etc/apt/preferences.d/prevent-systemd-260
               
               apt-get update
               
@@ -113,7 +117,7 @@ jobs:
               
               # Sync the container with the Sid mirrors
               apt-get dist-upgrade -y || true
-              
+
               apt-get autoremove -y
               
               apt-get install -y devscripts equivs build-essential dh-python git-buildpackage git tar
@@ -129,10 +133,13 @@ jobs:
               mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
               
               echo '=== Auto-Versioning ==='
-              # 1. Generate the snapshot FIRST
-              gbp dch --ignore-branch --snapshot --auto
+              # 1. Strip the 'v' from the GitHub tag (e.g., 'v2.0.23' becomes '2.0.23')
+              CLEAN_VER=\$(echo \$UPSTREAM_TAG | sed 's/^v//')
               
-              # 2. OVERWRITE IT. This strips everything between '-drbl' and the '~' and forces it to be '-drblsid'
+              # 2. Tell gbp to explicitly bump the changelog to this new upstream version
+              gbp dch --ignore-branch --new-version=\"\${CLEAN_VER}-drbl1\" --snapshot --auto
+              
+              # 3. OVERWRITE IT. This forces the 'drbl' part to match your OS codename
               sed -i -E '1s/-drbl[^~]+~/-drblsid~/' debian/changelog
               
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')

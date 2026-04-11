@@ -89,6 +89,7 @@ jobs:
             -e DEBFULLNAME="GitHub Actions CI" \
             -e DEBEMAIL="actions@github.com" \
             -e DEB_BUILD_OPTIONS="noautodbgsym" \
+            -e UPSTREAM_TAG="${{ needs.check-triggers.outputs.latest_tag }}" \
             ubuntu:resolute /bin/bash -c "
               set -e
               export DEBIAN_FRONTEND=noninteractive
@@ -108,10 +109,13 @@ jobs:
               mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
               
               echo '=== Auto-Versioning ==='
-              # 1. Generate the snapshot FIRST (It will generate something like '-drbl4ubuntu1~1.gbp88c1fb')
-              gbp dch --ignore-branch --snapshot --auto
+              # 1. Strip the 'v' from the GitHub tag
+              CLEAN_VER=\$(echo \$UPSTREAM_TAG | sed 's/^v//')
               
-              # 2. OVERWRITE IT. This strips everything between '-drbl' and the '~' and forces it to be '-drblresolute'
+              # 2. Tell gbp to explicitly bump the changelog to this new upstream version
+              gbp dch --ignore-branch --new-version=\"\${CLEAN_VER}-drbl1\" --snapshot --auto
+              
+              # 3. OVERWRITE IT. This forces the 'drbl' part to match your OS codename
               sed -i -E '1s/-drbl[^~]+~/-drblresolute~/' debian/changelog
               
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')

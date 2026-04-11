@@ -111,16 +111,11 @@ jobs:
               printf \"Package: systemd systemd-sysv libsystemd0 udev libudev1\nPin: version 260*\nPin-Priority: -1\n\" > /etc/apt/preferences.d/prevent-systemd-260
               
               apt-get update
-              
-              # Freeze systemd at v259 so it doesn't upgrade to v260 and crash QEMU
-              apt-mark hold systemd systemd-sysv libsystemd0 udev libudev1
-              
-              # Sync the container with the Sid mirrors
               apt-get dist-upgrade -y || true
-
               apt-get autoremove -y
               
-              apt-get install -y devscripts equivs build-essential dh-python git-buildpackage git tar
+              # ADDED: --no-install-recommends to prevent APT from complaining about the missing systemd
+              apt-get install -y --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar
               
               mkdir -p /build
               cp -a /src/. /build/

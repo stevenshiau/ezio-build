@@ -150,8 +150,11 @@ jobs:
               # Tell gbp to explicitly bump the changelog to this new upstream version
               gbp dch --ignore-branch --new-version=\"\${CLEAN_VER}-drbl1\" --snapshot --auto
               
-              # OVERWRITE IT. This forces the 'drbl' part to match your OS codename
-              sed -i -E '1s/-drbl[^~]+~/-drblsid~/' debian/changelog
+              # Grab the exact timestamp to ensure strictly chronological sorting
+              PKG_TIMESTAMP=\$(date +'%Y%m%d%H%M')
+              
+              # OVERWRITE IT. Forces the OS codename and timestamp into the changelog (stripping gbp hash)
+              sed -i -E \"1s/-drbl[^)]+/-drblsid~\${PKG_TIMESTAMP}/\" debian/changelog
               
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')
               

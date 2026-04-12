@@ -106,6 +106,7 @@ jobs:
             debian:sid /bin/bash -c "
               set -e
               export DEBIAN_FRONTEND=noninteractive
+              export EDITOR=/bin/true
               
               # Completely forbid APT from installing systemd v260+ to prevent QEMU crashes
               printf \"Package: systemd systemd-sysv libsystemd0 udev libudev1\nPin: version 260*\nPin-Priority: -1\n\" > /etc/apt/preferences.d/prevent-systemd-260
@@ -115,7 +116,8 @@ jobs:
               apt-get autoremove -y
               
               # ADDED: --no-install-recommends to prevent APT from complaining about the missing systemd
-              apt-get install -y --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar
+              # ADDED: libdistro-info-perl to suppress distro name warnings
+              apt-get install -y --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar libdistro-info-perl
               
               mkdir -p /build
               cp -a /src/. /build/
@@ -151,10 +153,12 @@ jobs:
               PKG_TIMESTAMP=\$(date +'%Y%m%d%H%M')
               
               # 2. Tell gbp to build the exact version string, set it to unstable, and mark it as a release
+              # ADDED: --spawn-editor=never to fix the headless crash
               gbp dch --ignore-branch \
                       --new-version=\"\${CLEAN_VER}-drblsid~\${PKG_TIMESTAMP}\" \
                       --distribution=\"unstable\" \
                       --release \
+                      --spawn-editor=never \
                       --auto
               
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')

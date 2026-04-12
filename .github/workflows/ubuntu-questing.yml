@@ -93,9 +93,10 @@ jobs:
             ubuntu:25.10 /bin/bash -c "
               set -e
               export DEBIAN_FRONTEND=noninteractive
+              export EDITOR=/bin/true
               
               apt-get update
-              apt-get install -y --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar
+              apt-get install -y --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar libdistro-info-perl
               
               mkdir -p /build
               cp -a /src/. /build/
@@ -133,6 +134,7 @@ jobs:
                       --new-version=\"\${CLEAN_VER}-drblquesting~\${PKG_TIMESTAMP}\" \
                       --distribution=\"unstable\" \
                       --release \
+                      --spawn-editor=never \
                       --auto
               
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')

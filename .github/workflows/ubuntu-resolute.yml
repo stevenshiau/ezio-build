@@ -105,6 +105,9 @@ jobs:
               git config --global user.name \"\$DEBFULLNAME\"
               git config --global user.email \"\$DEBEMAIL\"
               
+              # Create a branch from the detached HEAD tag to safely modify the changelog
+              git checkout -b auto-build-branch
+              
               # Resolve build-dependencies for Resolute
               mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
               

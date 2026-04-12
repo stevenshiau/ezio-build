@@ -125,19 +125,32 @@ jobs:
               git config --global user.name \"\$DEBFULLNAME\"
               git config --global user.email \"\$DEBEMAIL\"
               
-              # Create a branch from the detached HEAD tag to safely modify the changelog
+              # Create a branch from the detached HEAD tag to safely modify the source
               git checkout -b auto-build-branch
+              
+              echo '=== Injecting Upstream Version Tag ==='
+              CLEAN_VER=\$(echo \$UPSTREAM_TAG | sed 's/^v//')
+              
+              # Upstream relies on git export-subst during release tarball generation to 
+              # embed the version tag inside cmake/Version.cmake. We pipe git archive back 
+              # onto the working tree to manually trigger this substitution.
+              git archive --format=tar HEAD | tar xf -
+              
+              # Provide explicit fallback version files for CMake just in case
+              echo \"\${UPSTREAM_TAG}\" > VERSION
+              echo \"\${CLEAN_VER}\" > .version
+              
+              # Commit the modified tracked files so dpkg-source does not abort the build
+              git add cmake/Version.cmake VERSION .version 2>/dev/null || true
+              git commit -m \"Inject version tag into source tree\" || true
               
               mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
               
               echo '=== Auto-Versioning ==='
-              # 1. Strip the 'v' from the GitHub tag (e.g., 'v2.0.23' becomes '2.0.23')
-              CLEAN_VER=\$(echo \$UPSTREAM_TAG | sed 's/^v//')
-              
-              # 2. Tell gbp to explicitly bump the changelog to this new upstream version
+              # Tell gbp to explicitly bump the changelog to this new upstream version
               gbp dch --ignore-branch --new-version=\"\${CLEAN_VER}-drbl1\" --snapshot --auto
               
-              # 3. OVERWRITE IT. This forces the 'drbl' part to match your OS codename
+              # OVERWRITE IT. This forces the 'drbl' part to match your OS codename
               sed -i -E '1s/-drbl[^~]+~/-drblsid~/' debian/changelog
               
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')

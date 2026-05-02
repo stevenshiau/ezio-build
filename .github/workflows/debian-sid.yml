@@ -6,7 +6,7 @@ on:
     paths-ignore:
       - '.github/workflows/**'
   schedule:
-    - cron: '15 0 * * *' # Checks Debian mirrors every day
+    - cron: '11 20 * * *' # Checks Debian mirrors every day
   workflow_dispatch:
 
 env:

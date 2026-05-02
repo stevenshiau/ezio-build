@@ -207,7 +207,7 @@ jobs:
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
           rsync -avz -e "ssh -i ~/.ssh/id_rsa" ezio-src/output-debs/ $USER@$HOST:$DEST
 
-      - name: Send Telegram Notification
+      - name: Send Telegram Notification (Success)
         if: success()
         uses: appleboy/telegram-action@master
         with:
@@ -218,4 +218,17 @@ jobs:
             
             📦 Project: ${{ github.repository }}
             ⏱️ Timestamp: ${{ steps.time.outputs.timestamp }}
+            🔗 Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+
+      - name: Send Telegram Notification (Failure)
+        if: failure()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            ❌ FAILED: Debian Sid (${{ matrix.arch }}) Auto-Build
+            
+            The build crashed! Please check the logs.
+            📦 Project: ${{ github.repository }}
             🔗 Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

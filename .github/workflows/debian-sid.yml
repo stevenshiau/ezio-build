@@ -206,3 +206,16 @@ jobs:
           chmod 600 ~/.ssh/id_rsa
           ssh-keyscan -H "$HOST" >> ~/.ssh/known_hosts
           rsync -avz -e "ssh -i ~/.ssh/id_rsa" ezio-src/output-debs/ $USER@$HOST:$DEST
+
+      - name: Send Telegram Notification
+        if: success()
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ secrets.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          message: |
+            ✅ SUCCESS: Debian Sid (${{ matrix.arch }}) Auto-Build
+            
+            📦 Project: ${{ github.repository }}
+            ⏱️ Timestamp: ${{ steps.time.outputs.timestamp }}
+            🔗 Run URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}

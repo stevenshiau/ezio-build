@@ -90,14 +90,20 @@ jobs:
             -e DEBEMAIL="actions@github.com" \
             -e DEB_BUILD_OPTIONS="noautodbgsym" \
             -e UPSTREAM_TAG="${{ needs.check-triggers.outputs.latest_tag }}" \
-            ubuntu:stonking /bin/bash -c "
+            ubuntu:resolute /bin/bash -c "    # <--- Start with resolute
               set -e
               export DEBIAN_FRONTEND=noninteractive
               export EDITOR=/bin/true
-              
+
+              # Swap APT sources to Stonking and perform a dist-upgrade
+              sed -i 's/resolute/stonking/g' /etc/apt/sources.list.d/ubuntu.sources
               apt-get update
+              apt-get dist-upgrade -y
+              apt-get autoremove -y
+
+              # Now install your build tools
               apt-get install -y --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar libdistro-info-perl
-              
+
               mkdir -p /build
               cp -a /src/. /build/
               cd /build

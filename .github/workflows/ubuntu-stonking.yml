@@ -130,7 +130,9 @@ jobs:
               git commit -m \"Inject version tag into source tree\" || true
               
               # Resolve build-dependencies for Stonking
-              mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
+              # Stop using mk-build-deps because its dummy-package workaround hides the actual name of the broken package.
+              # mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
+              apt-get build-dep -y .
               
               echo '=== Auto-Versioning ==='
               # 1. Grab the exact timestamp first

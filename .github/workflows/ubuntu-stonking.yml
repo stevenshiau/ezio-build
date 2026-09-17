@@ -102,11 +102,8 @@ jobs:
               sed -i 's/resolute/stonking/g' /etc/apt/sources.list.d/ubuntu.sources
               
               # Force APT to prefer Stonking versions even if it requires downgrading installed packages
-              cat <<'EOF' > /etc/apt/preferences.d/pin-stonking
-Package: *
-Pin: release a=stonking
-Pin-Priority: 1001
-EOF
+              echo -e "Package: *\nPin: release a=stonking\nPin-Priority: 1001" > /etc/apt/preferences.d/pin-stonking
+
               apt-get update
               apt-get dist-upgrade -y --allow-downgrades
               apt-get autoremove -y

@@ -180,7 +180,7 @@ jobs:
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')
               
               echo '=== Building SOURCE and Binary (amd64) ==='
-              tar --exclude=debian -czf ../ezio_\${UPSTREAM_VER}.orig.tar.gz .
+              tar --exclude=.git --exclude=debian -czf ../ezio_\${UPSTREAM_VER}.orig.tar.gz .
               dpkg-buildpackage -us -uc
               
               mkdir -p /src/output-debs

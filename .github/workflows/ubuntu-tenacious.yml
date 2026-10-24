@@ -1,4 +1,4 @@
-name: Ubuntu Resolute Auto-Build
+name: Ubuntu Tenacious Auto-Build
 
 on:
   push:
@@ -6,7 +6,7 @@ on:
     paths-ignore:
       - '.github/workflows/**'
   schedule:
-    - cron: '33 20 * * *' # Checks Ubuntu mirrors every day
+    - cron: '22 20 * * *' # Checks Ubuntu mirrors every day
   workflow_dispatch:
 
 env:
@@ -28,17 +28,17 @@ jobs:
           LATEST_TAG=$(gh api repos/tjjh89017/ezio/tags --jq '.[0].name')
           echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
           
-          # 2. Fetch Latest Resolute Versions
+          # 2. Fetch Latest Tenacious Versions
           BASE_URL="https://people.canonical.com/~ubuntu-archive/madison.cgi"
-          PY3_VER=$(curl -s "${BASE_URL}?package=python3&s=resolute&text=on" | awk '{print $3}' | head -n 1)
-          GRPCIO_VER=$(curl -s "${BASE_URL}?package=python3-grpcio&s=resolute&text=on" | awk '{print $3}' | head -n 1)
-          GRPC_TOOLS_VER=$(curl -s "${BASE_URL}?package=python3-grpc-tools&s=resolute&text=on" | awk '{print $3}' | head -n 1)
-          URWID_VER=$(curl -s "${BASE_URL}?package=python3-urwid&s=resolute&text=on" | awk '{print $3}' | head -n 1)
-          LIBTORRENT_VER=$(curl -s "${BASE_URL}?package=libtorrent-rasterbar-dev&s=resolute&text=on" | awk '{print $3}' | head -n 1)
-          GRPC_CPP_VER=$(curl -s "${BASE_URL}?package=libgrpc++-dev&s=resolute&text=on" | awk '{print $3}' | head -n 1)
+          PY3_VER=$(curl -s "${BASE_URL}?package=python3&s=tenacious&text=on" | awk '{print $3}' | head -n 1)
+          GRPCIO_VER=$(curl -s "${BASE_URL}?package=python3-grpcio&s=tenacious&text=on" | awk '{print $3}' | head -n 1)
+          GRPC_TOOLS_VER=$(curl -s "${BASE_URL}?package=python3-grpc-tools&s=tenacious&text=on" | awk '{print $3}' | head -n 1)
+          URWID_VER=$(curl -s "${BASE_URL}?package=python3-urwid&s=tenacious&text=on" | awk '{print $3}' | head -n 1)
+          LIBTORRENT_VER=$(curl -s "${BASE_URL}?package=libtorrent-rasterbar-dev&s=tenacious&text=on" | awk '{print $3}' | head -n 1)
+          GRPC_CPP_VER=$(curl -s "${BASE_URL}?package=libgrpc++-dev&s=tenacious&text=on" | awk '{print $3}' | head -n 1)
           
           # 3. Create Combined Fingerprint
-          FINGERPRINT="resolute-tag${LATEST_TAG}-py${PY3_VER}-grio${GRPCIO_VER}-gtl${GRPC_TOOLS_VER}-urw${URWID_VER}-lt${LIBTORRENT_VER}-gcp${GRPC_CPP_VER}"
+          FINGERPRINT="tenacious-tag${LATEST_TAG}-py${PY3_VER}-grio${GRPCIO_VER}-gtl${GRPC_TOOLS_VER}-urw${URWID_VER}-lt${LIBTORRENT_VER}-gcp${GRPC_CPP_VER}"
           echo "Combined Fingerprint: $FINGERPRINT"
           echo "fingerprint=$FINGERPRINT" >> $GITHUB_OUTPUT
 
@@ -47,7 +47,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: last-build-fingerprint.txt
-          key: build-cache-resolute-${{ steps.check.outputs.fingerprint }}
+          key: build-cache-tenacious-${{ steps.check.outputs.fingerprint }}
 
       - name: Decide to Build
         id: decision
@@ -114,14 +114,24 @@ jobs:
             -e DEBEMAIL="actions@github.com" \
             -e DEB_BUILD_OPTIONS="noautodbgsym" \
             -e UPSTREAM_TAG="${{ needs.check-triggers.outputs.latest_tag }}" \
-            ubuntu:resolute /bin/bash -c "
+            ubuntu:stonking /bin/bash -c "    # <--- Start with stonking
               set -e
               export DEBIAN_FRONTEND=noninteractive
               export EDITOR=/bin/true
+
+              # Swap APT sources to Tenacious and perform a dist-upgrade
+              sed -i 's/stonking/tenacious/g' /etc/apt/sources.list.d/ubuntu.sources
               
+              # Force APT to prefer Tenacious versions even if it requires downgrading installed packages
+              printf 'Package: *\nPin: release a=tenacious\nPin-Priority: 1001\n' > /etc/apt/preferences.d/pin-tenacious
+
               apt-get update
-              apt-get install -y --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar libdistro-info-perl
-              
+              apt-get dist-upgrade -y --allow-downgrades
+              apt-get autoremove -y
+
+              # Now install your build tools
+              apt-get install -y --allow-downgrades --no-install-recommends devscripts equivs build-essential dh-python git-buildpackage git tar libdistro-info-perl
+
               mkdir -p /build
               cp -a /src/. /build/
               cd /build
@@ -147,7 +157,7 @@ jobs:
               git add cmake/Version.cmake VERSION .version 2>/dev/null || true
               git commit -m \"Inject version tag into source tree\" || true
               
-              # Resolve build-dependencies for Resolute
+              # Resolve build-dependencies for Tenacious
               # Stop using mk-build-deps because its dummy-package workaround hides the actual name of the broken package.
               # mk-build-deps -i -t 'apt-get -y --no-install-recommends' debian/control
               apt-get build-dep -y .
@@ -158,7 +168,7 @@ jobs:
               
               # 2. Tell gbp to build the exact version string, set it to unstable, and mark it as a release
               gbp dch --ignore-branch \
-                      --new-version=\"\${CLEAN_VER}-drblresolute~\${PKG_TIMESTAMP}\" \
+                      --new-version=\"\${CLEAN_VER}-drbltenacious~\${PKG_TIMESTAMP}\" \
                       --distribution=\"unstable\" \
                       --release \
                       --spawn-editor=never \
@@ -192,7 +202,7 @@ jobs:
       - name: Upload .deb to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ezio-resolute-packages-amd64-${{ steps.time.outputs.timestamp }}
+          name: ezio-tenacious-packages-amd64-${{ steps.time.outputs.timestamp }}
           path: ezio-src/output-debs/
 
       - name: Deploy to file Server
@@ -216,7 +226,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
-            ✅ SUCCESS: Ubuntu Resolute Auto-Build
+            ✅ SUCCESS: Ubuntu Tenacious Auto-Build
 
             📦 Project: ${{ github.repository }}
             ⏱️ Timestamp: ${{ steps.time.outputs.timestamp }}
@@ -229,7 +239,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
-            ❌ FAILED: Ubuntu Resolute Auto-Build
+            ❌ FAILED: Ubuntu Tenacious Auto-Build
 
             The build crashed! Please check the logs.
             📦 Project: ${{ github.repository }}

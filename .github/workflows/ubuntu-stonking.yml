@@ -18,6 +18,7 @@ jobs:
     outputs:
       needs_build: ${{ steps.decision.outputs.needs_build }}
       latest_tag: ${{ steps.check.outputs.tag }}
+      pkg_timestamp: ${{ steps.decision.outputs.pkg_timestamp }}
     steps:
       - name: Fetch Upstream Tag and Dependencies
         id: check
@@ -73,6 +74,7 @@ jobs:
           if [ ${#reasons[@]} -gt 0 ]; then
             echo "needs_build=true" >> $GITHUB_OUTPUT
             echo "${{ steps.check.outputs.fingerprint }}" > last-build-fingerprint.txt
+            echo "pkg_timestamp=$(date -u +'%Y%m%d%H%M')" >> $GITHUB_OUTPUT
             echo "Decision: BUILD TRIGGERED"
             echo "Trigger Reason(s):"
             for r in "${reasons[@]}"; do
@@ -88,6 +90,12 @@ jobs:
     needs: check-triggers
     if: needs.check-triggers.outputs.needs_build == 'true'
     runs-on: ubuntu-latest
+    
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, arm64, riscv64]
+        
     steps:
       - name: Checkout Upstream Code
         uses: actions/checkout@v4
@@ -106,14 +114,23 @@ jobs:
         run: |
           cp -a ezio-build/debian/ ezio-src/debian/
 
+      - name: Set up QEMU
+        if: matrix.arch != 'amd64'
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: ${{ matrix.arch }}
+
       - name: Build Debian Package
         run: |
           docker run --rm \
+            --platform linux/${{ matrix.arch }} \
             -v ${{ github.workspace }}/ezio-src:/src \
             -e DEBFULLNAME="GitHub Actions CI" \
             -e DEBEMAIL="actions@github.com" \
             -e DEB_BUILD_OPTIONS="noautodbgsym" \
             -e UPSTREAM_TAG="${{ needs.check-triggers.outputs.latest_tag }}" \
+            -e PKG_TIMESTAMP="${{ needs.check-triggers.outputs.pkg_timestamp }}" \
+            -e ARCH="${{ matrix.arch }}" \
             ubuntu:stonking /bin/bash -c "
               set -e
               export DEBIAN_FRONTEND=noninteractive
@@ -153,10 +170,7 @@ jobs:
               apt-get build-dep -y .
               
               echo '=== Auto-Versioning ==='
-              # 1. Grab the exact timestamp first
-              PKG_TIMESTAMP=\$(date +'%Y%m%d%H%M')
-              
-              # 2. Tell gbp to build the exact version string, set it to unstable, and mark it as a release
+              # Tell gbp to build the exact version string using the unified timestamp from check-triggers
               gbp dch --ignore-branch \
                       --new-version=\"\${CLEAN_VER}-drblstonking~\${PKG_TIMESTAMP}\" \
                       --distribution=\"unstable\" \
@@ -166,15 +180,23 @@ jobs:
               
               UPSTREAM_VER=\$(dpkg-parsechangelog -S Version | sed 's/-.*//' | sed 's/~.*//')
               
-              echo '=== Building SOURCE and Binary (amd64) ==='
-              tar --exclude=.git --exclude=debian -czf ../ezio_\${UPSTREAM_VER}.orig.tar.gz .
-              dpkg-buildpackage -us -uc
-              
               mkdir -p /src/output-debs
+              
+              # Only amd64 builds the source package to prevent conflicting orig tarballs and race conditions
+              if [ \"\$ARCH\" = \"amd64\" ]; then
+                echo '=== Building SOURCE and Binary (amd64) ==='
+                tar --exclude=.git --exclude=debian -czf ../ezio_\${UPSTREAM_VER}.orig.tar.gz .
+                dpkg-buildpackage -us -uc
+                
+                cp ../*.orig.tar.gz /src/output-debs/ || true
+                cp ../*.dsc /src/output-debs/ || true
+                cp ../*.debian.tar.xz /src/output-debs/ || true
+              else
+                echo \"=== Building Binary Only (\$ARCH) ===\"
+                dpkg-buildpackage -b -us -uc
+              fi
+              
               cp ../*.deb /src/output-debs/
-              cp ../*.orig.tar.gz /src/output-debs/ || true
-              cp ../*.dsc /src/output-debs/ || true
-              cp ../*.debian.tar.xz /src/output-debs/ || true
               cp ../*.changes /src/output-debs/ || true
 
               # Grant full read permissions so GitHub Actions can upload the files
@@ -192,7 +214,7 @@ jobs:
       - name: Upload .deb to GitHub Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ezio-stonking-packages-amd64-${{ steps.time.outputs.timestamp }}
+          name: ezio-stonking-packages-${{ matrix.arch }}-${{ steps.time.outputs.timestamp }}
           path: ezio-src/output-debs/
 
       - name: Deploy to file Server
@@ -216,7 +238,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
-            ✅ SUCCESS: Ubuntu Stonking Auto-Build
+            ✅ SUCCESS: Ubuntu Stonking (${{ matrix.arch }}) Auto-Build
 
             📦 Project: ${{ github.repository }}
             ⏱️ Timestamp: ${{ steps.time.outputs.timestamp }}
@@ -229,7 +251,7 @@ jobs:
           to: ${{ secrets.TELEGRAM_TO }}
           token: ${{ secrets.TELEGRAM_TOKEN }}
           message: |
-            ❌ FAILED: Ubuntu Stonking Auto-Build
+            ❌ FAILED: Ubuntu Stonking (${{ matrix.arch }}) Auto-Build
 
             The build crashed! Please check the logs.
             📦 Project: ${{ github.repository }}
